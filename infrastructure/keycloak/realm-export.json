@@ -1,0 +1,61 @@
+{
+  "realm": "finsentinel",
+  "enabled": true,
+  "displayName": "FinSentinel AI",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "fraud_analyst"
+      },
+      {
+        "name": "aml_investigator"
+      },
+      {
+        "name": "credit_analyst"
+      },
+      {
+        "name": "compliance_officer"
+      },
+      {
+        "name": "executive"
+      },
+      {
+        "name": "platform_admin"
+      },
+      {
+        "name": "auditor"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "finsentinel-web",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "analyst",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "fraud_analyst"
+      ]
+    }
+  ]
+}

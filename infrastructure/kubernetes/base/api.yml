@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finsentinel-api
+  namespace: finsentinel
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: finsentinel-api }
+  template:
+    metadata:
+      labels: { app: finsentinel-api }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/your-github-user/finsentinel-api:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 1000m, memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finsentinel-api
+  namespace: finsentinel
+spec:
+  selector: { app: finsentinel-api }
+  ports:
+    - port: 80
+      targetPort: 8000
