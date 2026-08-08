@@ -112,6 +112,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://finsentinel:finsentinel_dev@postgres:5432/finsentinel
     ports: ["8000:8000", "9464:9464"]
+    volumes:
+      - ./apps/api/artifacts:/app/artifacts:ro
     depends_on:
       postgres:
         condition: service_healthy

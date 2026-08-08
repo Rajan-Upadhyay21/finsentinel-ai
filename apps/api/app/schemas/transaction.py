@@ -14,6 +14,12 @@ class TransactionFeatures(BaseModel):
     amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     currency: str = Field(default="USD", min_length=3, max_length=3)
     country_code: str = Field(default="US", min_length=2, max_length=2)
+
+    # Runtime ML features.
+    is_cross_border: bool = False
+    account_age_days: int = Field(default=0, ge=0, le=50000)
+    customer_tenure_days: int = Field(default=0, ge=0, le=50000)
+
     device_known: bool = True
     ip_risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     merchant_risk_score: float = Field(default=0.0, ge=0.0, le=1.0)

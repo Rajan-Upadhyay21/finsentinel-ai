@@ -2,46 +2,87 @@
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
+
 [project]
 name = "finsentinel-api"
 version = "0.1.0"
 description = "FinSentinel AI banking intelligence API"
 requires-python = ">=3.11"
+
 dependencies = [
-  "fastapi>=0.115",
-  "uvicorn[standard]>=0.30",
-  "pydantic>=2.9",
-  "pydantic-settings>=2.5",
-  "sqlalchemy>=2.0",
-  "psycopg[binary]>=3.2",
-  "alembic>=1.13",
-  "httpx>=0.27",
-  "pyjwt[crypto]>=2.9",
-  "prometheus-client>=0.21",
-  "email-validator>=2.2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.13",
+    "httpx>=0.27",
+    "pyjwt[crypto]>=2.9",
+    "prometheus-client>=0.21",
+    "email-validator>=2.2.0",
+
+    # =========================================================
+    # PRODUCTION ML INFERENCE
+    # =========================================================
+    "numpy>=2.0",
+    "scikit-learn>=1.5",
+    "xgboost>=2.1",
+    "joblib>=1.4",
 ]
 
+
 [project.optional-dependencies]
+
 dev = [
-  "pytest>=8.3",
-  "pytest-asyncio>=0.24",
-  "ruff>=0.7",
-  "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
 ]
+
+ml = [
+    # Data science / training
+    "pandas>=2.2",
+    "scipy>=1.14",
+
+    # Explainability
+    "shap>=0.46",
+
+    # Experiment tracking / model registry
+    "mlflow>=3.0",
+
+    # Hyperparameter optimization
+    "optuna>=4.0",
+
+    # Imbalanced fraud datasets
+    "imbalanced-learn>=0.12",
+
+    # Model analysis / plots
+    "matplotlib>=3.9",
+
+    # Efficient dataset storage
+    "pyarrow>=17.0",
+]
+
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
 
 [tool.mypy]
 python_version = "3.11"

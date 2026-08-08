@@ -368,6 +368,32 @@ async def investigate_stored_transaction(
             detail="Customer linked to account was not found.",
         )
 
+    metadata = transaction.metadata_json or {}
+
+    transaction_country = str(
+        metadata.get("country", customer.country_code)
+    ).upper()
+    customer_country = str(customer.country_code).upper()
+
+    is_cross_border = bool(
+        metadata.get(
+            "is_cross_border",
+            transaction_country != customer_country,
+        )
+    )
+
+    def age_in_days(value: datetime | None) -> int:
+        if value is None:
+            return 0
+
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+
+        return max(
+            (datetime.now(timezone.utc) - value).days,
+            0,
+        )
+
     features = TransactionFeatures(
         transaction_id=transaction.id,
         customer_id=customer.external_id,
@@ -375,17 +401,20 @@ async def investigate_stored_transaction(
         merchant_id=transaction.merchant_id or "UNKNOWN-MERCHANT",
         amount=transaction.amount,
         currency=transaction.currency,
-        country_code=(
-            transaction.metadata_json.get("country", customer.country_code)
-            if transaction.metadata_json
-            else customer.country_code
-        ),
+        country_code=transaction_country,
+        is_cross_border=is_cross_border,
+        account_age_days=age_in_days(account.created_at),
+        customer_tenure_days=age_in_days(customer.created_at),
         device_known=transaction.device_known,
         ip_risk_score=float(transaction.ip_risk_score),
         merchant_risk_score=float(transaction.merchant_risk_score),
         amount_zscore=float(transaction.amount_zscore),
         velocity_1h=transaction.velocity_1h,
-        timestamp=transaction.occurred_at or transaction.created_at,
+        timestamp=(
+            transaction.occurred_at
+            or transaction.created_at
+            or datetime.now(timezone.utc)
+        ),
     )
 
     request = InvestigationRequest(

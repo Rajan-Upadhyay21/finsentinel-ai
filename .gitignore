@@ -17,3 +17,7 @@ htmlcov/
 *.log
 mlruns/
 data/generated/*.jsonl
+
+# Local/generated ML artifacts
+apps/api/artifacts/
+apps/api/mlflow.db
