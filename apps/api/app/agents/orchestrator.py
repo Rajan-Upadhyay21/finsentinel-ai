@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 from app.schemas.investigation import (
     AgentFinding,
@@ -306,55 +307,364 @@ async def _policy_agent(
     )
 
 
-AgentCallable = Callable[[InvestigationRequest, TransactionScore], Awaitable[AgentFinding]]
+AgentCallable = Callable[
+    [InvestigationRequest, TransactionScore],
+    Awaitable[AgentFinding],
+]
 
 
-async def run_investigation(request: InvestigationRequest) -> InvestigationDecision:
-    score = score_transaction(request.transaction)
+@dataclass(frozen=True)
+class AgentSpec:
+    name: str
+    handler: AgentCallable
+    timeout_seconds: float
+    confidence_weight: float
+    critical: bool = False
 
-    selected_agents: list[AgentCallable] = [
-        _fraud_agent,
-        _behavior_agent,
-        _graph_agent,
-        _policy_agent,
+
+@dataclass
+class OrchestrationState:
+    request: InvestigationRequest
+    score: TransactionScore
+    selected_agents: list[AgentSpec] = field(default_factory=list)
+    findings: list[AgentFinding] = field(default_factory=list)
+    contradictions: list[str] = field(default_factory=list)
+    decision: str = "approve"
+    final_confidence: float = 0.0
+
+
+def _select_agents(
+    request: InvestigationRequest,
+    score: TransactionScore,
+) -> list[AgentSpec]:
+    """
+    Route only the specialist agents needed for the current investigation.
+
+    Fraud, behavior and policy evaluation always run. Graph investigation is
+    activated when transaction or model signals justify network traversal.
+    """
+
+    agents = [
+        AgentSpec(
+            name="fraud_agent",
+            handler=_fraud_agent,
+            timeout_seconds=4.0,
+            confidence_weight=1.35,
+            critical=True,
+        ),
+        AgentSpec(
+            name="customer_behavior_agent",
+            handler=_behavior_agent,
+            timeout_seconds=4.0,
+            confidence_weight=0.85,
+        ),
     ]
-    findings = list(await asyncio.gather(*(agent(request, score) for agent in selected_agents)))
 
+    graph_required = (
+        score.combined_risk_score >= 0.35
+        or not request.transaction.device_known
+        or request.transaction.merchant_risk_score >= 0.40
+        or request.transaction.ip_risk_score >= 0.40
+        or request.transaction.velocity_1h >= 4
+    )
+
+    if graph_required:
+        agents.append(
+            AgentSpec(
+                name="graph_investigation_agent",
+                handler=_graph_agent,
+                timeout_seconds=6.0,
+                confidence_weight=1.10,
+            )
+        )
+
+    agents.append(
+        AgentSpec(
+            name="policy_compliance_agent",
+            handler=_policy_agent,
+            timeout_seconds=8.0,
+            confidence_weight=1.25,
+            critical=True,
+        )
+    )
+
+    return agents
+
+
+async def _run_agent_safely(
+    spec: AgentSpec,
+    request: InvestigationRequest,
+    score: TransactionScore,
+) -> AgentFinding:
+    """
+    Execute one specialist with timeout and failure isolation.
+
+    A failed external dependency must not crash the entire banking workflow.
+    """
+
+    try:
+        return await asyncio.wait_for(
+            spec.handler(request, score),
+            timeout=spec.timeout_seconds,
+        )
+
+    except TimeoutError:
+        warning = (
+            f"{spec.name} exceeded its "
+            f"{spec.timeout_seconds:.1f}s execution timeout."
+        )
+
+        return AgentFinding(
+            agent=spec.name,
+            status="completed",
+            conclusion=(
+                "Specialist execution timed out; the orchestrator "
+                "continued in degraded mode."
+            ),
+            confidence=0.25 if spec.critical else 0.35,
+            evidence=[
+                Evidence(
+                    source="orchestrator_runtime",
+                    category="orchestration",
+                    summary=warning,
+                    confidence=0.30,
+                    reference=str(request.transaction.transaction_id),
+                )
+            ],
+            warnings=[warning],
+        )
+
+    except Exception as exc:
+        warning = (
+            f"{spec.name} failed with "
+            f"{type(exc).__name__}; workflow isolation prevented "
+            "a full investigation failure."
+        )
+
+        return AgentFinding(
+            agent=spec.name,
+            status="completed",
+            conclusion=(
+                "Specialist execution failed; the orchestrator "
+                "continued using available evidence."
+            ),
+            confidence=0.20 if spec.critical else 0.30,
+            evidence=[
+                Evidence(
+                    source="orchestrator_runtime",
+                    category="orchestration",
+                    summary=warning,
+                    confidence=0.25,
+                    reference=str(request.transaction.transaction_id),
+                )
+            ],
+            warnings=[warning],
+        )
+
+
+def _finding(
+    findings: list[AgentFinding],
+    agent_name: str,
+) -> AgentFinding | None:
+    return next(
+        (
+            finding
+            for finding in findings
+            if finding.agent == agent_name
+        ),
+        None,
+    )
+
+
+def _detect_contradictions(
+    state: OrchestrationState,
+) -> list[str]:
     contradictions: list[str] = []
-    fraud_finding = next(item for item in findings if item.agent == "fraud_agent")
-    graph_finding = next(item for item in findings if item.agent == "graph_investigation_agent")
-    if score.requires_human_review and "No risky relationship" in graph_finding.conclusion:
-        contradictions.append("Model risk is high, but the current graph signal is weak.")
-    if not score.requires_human_review and "escalation" in fraud_finding.conclusion:
-        contradictions.append("Fraud conclusion conflicts with the configured review threshold.")
+
+    fraud = _finding(state.findings, "fraud_agent")
+    graph = _finding(
+        state.findings,
+        "graph_investigation_agent",
+    )
+    policy = _finding(
+        state.findings,
+        "policy_compliance_agent",
+    )
+
+    if (
+        state.score.requires_human_review
+        and graph is not None
+        and "No suspicious multi-entity relationships"
+        in graph.conclusion
+    ):
+        contradictions.append(
+            "ML risk is high while Neo4j network evidence is weak."
+        )
+
+    if (
+        not state.score.requires_human_review
+        and fraud is not None
+        and "require escalation" in fraud.conclusion
+    ):
+        contradictions.append(
+            "Fraud-agent escalation conflicts with the model review threshold."
+        )
+
+    if (
+        state.score.requires_human_review
+        and policy is not None
+        and "do not require escalation" in policy.conclusion
+    ):
+        contradictions.append(
+            "Model risk requires review while policy retrieval suggests no escalation."
+        )
+
+    degraded_agents = [
+        finding.agent
+        for finding in state.findings
+        if any(
+            evidence.source == "orchestrator_runtime"
+            for evidence in finding.evidence
+        )
+    ]
+
+    if degraded_agents:
+        contradictions.append(
+            "Specialist degradation detected: "
+            + ", ".join(degraded_agents)
+            + "."
+        )
+
+    return contradictions
+
+
+def _choose_decision(score: TransactionScore) -> str:
+    """
+    Preserve the governed decision contract used by the banking persistence
+    layer and human approval workflow.
+    """
 
     if score.combined_risk_score >= 0.85:
-        decision = "block"
-    elif score.requires_human_review:
-        decision = "manual_review"
-    elif score.combined_risk_score >= 0.35:
-        decision = "monitor"
-    else:
-        decision = "approve"
+        return "block"
 
-    confidence_values = [finding.confidence for finding in findings]
-    final_confidence = sum(confidence_values) / len(confidence_values)
-    if contradictions:
-        final_confidence *= 0.88
+    if score.requires_human_review:
+        return "manual_review"
+
+    if score.combined_risk_score >= 0.35:
+        return "monitor"
+
+    return "approve"
+
+
+def _aggregate_confidence(
+    state: OrchestrationState,
+) -> float:
+    """
+    Compute weighted confidence instead of a simple arithmetic mean.
+
+    Fraud and policy specialists receive more weight because they directly
+    support the governed transaction decision.
+    """
+
+    weights = {
+        spec.name: spec.confidence_weight
+        for spec in state.selected_agents
+    }
+
+    weighted_total = 0.0
+    total_weight = 0.0
+
+    for finding in state.findings:
+        weight = weights.get(finding.agent, 1.0)
+        weighted_total += finding.confidence * weight
+        total_weight += weight
+
+    if total_weight == 0:
+        return 0.0
+
+    confidence = weighted_total / total_weight
+
+    if state.contradictions:
+        confidence *= 0.90
+
+    degraded = any(
+        evidence.source == "orchestrator_runtime"
+        for finding in state.findings
+        for evidence in finding.evidence
+    )
+
+    if degraded:
+        confidence *= 0.85
+
+    return round(
+        min(1.0, max(0.0, confidence)),
+        4,
+    )
+
+
+async def run_investigation(
+    request: InvestigationRequest,
+) -> InvestigationDecision:
+    score = score_transaction(request.transaction)
+
+    state = OrchestrationState(
+        request=request,
+        score=score,
+    )
+
+    state.selected_agents = _select_agents(
+        request,
+        score,
+    )
+
+    # Specialist agents execute concurrently. Each execution is individually
+    # protected by timeout and failure isolation.
+    state.findings = list(
+        await asyncio.gather(
+            *(
+                _run_agent_safely(
+                    spec,
+                    request,
+                    score,
+                )
+                for spec in state.selected_agents
+            )
+        )
+    )
+
+    state.contradictions = _detect_contradictions(state)
+    state.decision = _choose_decision(score)
+    state.final_confidence = _aggregate_confidence(state)
+
+    selected_names = [
+        spec.name
+        for spec in state.selected_agents
+    ]
 
     rationale = (
-        f"The orchestrator selected {len(selected_agents)} specialist agents. "
-        f"The combined risk score is {score.combined_risk_score:.2f}; "
-        f"the governed decision is {decision}."
+        f"The orchestrator dynamically routed the investigation to "
+        f"{len(selected_names)} specialist agents: "
+        f"{', '.join(selected_names)}. "
+        f"The ML combined risk score is "
+        f"{score.combined_risk_score:.2f} ({score.risk_level}). "
+        f"The governed decision is {state.decision}. "
+        f"Aggregated specialist confidence is "
+        f"{state.final_confidence:.2f}."
     )
+
+    if state.contradictions:
+        rationale += (
+            " Contradictions requiring additional caution: "
+            + " ".join(state.contradictions)
+        )
 
     return InvestigationDecision(
         case_id=request.case_id,
         workflow=request.workflow,
         transaction_score=score,
-        findings=findings,
-        contradictions=contradictions,
-        decision=decision,
-        final_confidence=round(final_confidence, 4),
+        findings=state.findings,
+        contradictions=state.contradictions,
+        decision=state.decision,
+        final_confidence=state.final_confidence,
         rationale=rationale,
     )
