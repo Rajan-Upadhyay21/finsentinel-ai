@@ -21,6 +21,9 @@ dependencies = [
     "pyjwt[crypto]>=2.9",
     "prometheus-client>=0.21",
     "email-validator>=2.2.0",
+    "neo4j>=5.25",
+    "qdrant-client>=1.12",
+    "fastembed>=0.4",
 
     # =========================================================
     # PRODUCTION ML INFERENCE

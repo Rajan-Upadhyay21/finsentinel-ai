@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
     neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "finsentinel_dev"
     kafka_bootstrap_servers: str = "localhost:19092"
 
     default_llm_provider: str = "mock"
