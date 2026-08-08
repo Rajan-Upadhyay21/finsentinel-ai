@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
 
-from app.api.routes import health, investigations, transactions
+from app.api.routes import banking, health, investigations, transactions
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -35,7 +35,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(transactions.router)
 app.include_router(investigations.router)
-
+app.include_router(banking.router)
 
 @app.get("/", tags=["system"])
 def root() -> dict[str, str]:
