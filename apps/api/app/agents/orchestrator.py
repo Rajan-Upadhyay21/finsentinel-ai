@@ -10,6 +10,13 @@ from app.schemas.investigation import (
 )
 from app.schemas.transaction import TransactionScore
 from app.services.risk_engine import score_transaction
+from app.services.credit_engine import score_credit_application
+from app.agents.workflow_agents import (
+    aml_agent,
+    compliance_agent,
+    credit_underwriting_agent,
+    workflow_policy_agent,
+)
 
 
 async def _fraud_agent(request: InvestigationRequest, score: TransactionScore) -> AgentFinding:
@@ -602,10 +609,141 @@ def _aggregate_confidence(
     )
 
 
-async def run_investigation(
+@dataclass(frozen=True)
+class WorkflowTask:
+    name: str
+    factory: Callable[[], Awaitable[AgentFinding]]
+    timeout_seconds: float
+    confidence_weight: float = 1.0
+    critical: bool = False
+
+
+async def _run_workflow_task_safely(
+    task: WorkflowTask,
+    request: InvestigationRequest,
+) -> AgentFinding:
+    """
+    Run a Day 6 workflow specialist with timeout and failure isolation.
+    """
+
+    try:
+        return await asyncio.wait_for(
+            task.factory(),
+            timeout=task.timeout_seconds,
+        )
+
+    except TimeoutError:
+        warning = (
+            f"{task.name} exceeded its "
+            f"{task.timeout_seconds:.1f}s execution timeout."
+        )
+
+        return AgentFinding(
+            agent=task.name,
+            status="completed",
+            conclusion=(
+                "Specialist execution timed out; the governed "
+                "workflow continued in degraded mode."
+            ),
+            confidence=0.20 if task.critical else 0.30,
+            evidence=[
+                Evidence(
+                    source="orchestrator_runtime",
+                    category="orchestration",
+                    summary=warning,
+                    confidence=0.30,
+                    reference=str(request.case_id),
+                )
+            ],
+            warnings=[warning],
+        )
+
+    except Exception as exc:
+        warning = (
+            f"{task.name} failed with {type(exc).__name__}; "
+            "workflow isolation prevented a full investigation failure."
+        )
+
+        return AgentFinding(
+            agent=task.name,
+            status="completed",
+            conclusion=(
+                "Specialist execution failed; the governed "
+                "workflow continued using available evidence."
+            ),
+            confidence=0.20 if task.critical else 0.30,
+            evidence=[
+                Evidence(
+                    source="orchestrator_runtime",
+                    category="orchestration",
+                    summary=warning,
+                    confidence=0.25,
+                    reference=str(request.case_id),
+                )
+            ],
+            warnings=[warning],
+        )
+
+
+def _workflow_confidence(
+    findings: list[AgentFinding],
+    tasks: list[WorkflowTask],
+) -> float:
+    weights = {
+        task.name: task.confidence_weight
+        for task in tasks
+    }
+
+    weighted_total = 0.0
+    total_weight = 0.0
+
+    for finding in findings:
+        weight = weights.get(
+            finding.agent,
+            1.0,
+        )
+
+        weighted_total += (
+            finding.confidence * weight
+        )
+        total_weight += weight
+
+    if total_weight == 0:
+        return 0.0
+
+    confidence = (
+        weighted_total / total_weight
+    )
+
+    degraded = any(
+        evidence.source == "orchestrator_runtime"
+        for finding in findings
+        for evidence in finding.evidence
+    )
+
+    if degraded:
+        confidence *= 0.85
+
+    return round(
+        min(
+            1.0,
+            max(0.0, confidence),
+        ),
+        4,
+    )
+
+
+async def _run_fraud_workflow(
     request: InvestigationRequest,
 ) -> InvestigationDecision:
-    score = score_transaction(request.transaction)
+    if request.transaction is None:
+        raise ValueError(
+            "Fraud workflow requires transaction data."
+        )
+
+    score = score_transaction(
+        request.transaction
+    )
 
     state = OrchestrationState(
         request=request,
@@ -617,8 +755,6 @@ async def run_investigation(
         score,
     )
 
-    # Specialist agents execute concurrently. Each execution is individually
-    # protected by timeout and failure isolation.
     state.findings = list(
         await asyncio.gather(
             *(
@@ -632,9 +768,17 @@ async def run_investigation(
         )
     )
 
-    state.contradictions = _detect_contradictions(state)
-    state.decision = _choose_decision(score)
-    state.final_confidence = _aggregate_confidence(state)
+    state.contradictions = (
+        _detect_contradictions(state)
+    )
+
+    state.decision = (
+        _choose_decision(score)
+    )
+
+    state.final_confidence = (
+        _aggregate_confidence(state)
+    )
 
     selected_names = [
         spec.name
@@ -642,29 +786,443 @@ async def run_investigation(
     ]
 
     rationale = (
-        f"The orchestrator dynamically routed the investigation to "
+        "Fraud workflow dynamically routed to "
         f"{len(selected_names)} specialist agents: "
         f"{', '.join(selected_names)}. "
-        f"The ML combined risk score is "
-        f"{score.combined_risk_score:.2f} ({score.risk_level}). "
-        f"The governed decision is {state.decision}. "
-        f"Aggregated specialist confidence is "
-        f"{state.final_confidence:.2f}."
+        f"ML combined risk="
+        f"{score.combined_risk_score:.2f} "
+        f"({score.risk_level}). "
+        f"Governed decision={state.decision}. "
+        f"Confidence={state.final_confidence:.2f}."
     )
 
     if state.contradictions:
         rationale += (
-            " Contradictions requiring additional caution: "
-            + " ".join(state.contradictions)
+            " Contradictions: "
+            + " ".join(
+                state.contradictions
+            )
         )
 
     return InvestigationDecision(
         case_id=request.case_id,
-        workflow=request.workflow,
+        workflow="fraud",
         transaction_score=score,
         findings=state.findings,
         contradictions=state.contradictions,
         decision=state.decision,
-        final_confidence=state.final_confidence,
+        final_confidence=(
+            state.final_confidence
+        ),
         rationale=rationale,
+    )
+
+
+async def _run_aml_workflow(
+    request: InvestigationRequest,
+) -> InvestigationDecision:
+    if request.transaction is None:
+        raise ValueError(
+            "AML workflow requires transaction data."
+        )
+
+    score = score_transaction(
+        request.transaction
+    )
+
+    tasks: list[WorkflowTask] = [
+        WorkflowTask(
+            name="fraud_agent",
+            factory=lambda: _fraud_agent(
+                request,
+                score,
+            ),
+            timeout_seconds=4.0,
+            confidence_weight=1.0,
+        ),
+        WorkflowTask(
+            name="customer_behavior_agent",
+            factory=lambda: _behavior_agent(
+                request,
+                score,
+            ),
+            timeout_seconds=4.0,
+            confidence_weight=0.8,
+        ),
+        WorkflowTask(
+            name="graph_investigation_agent",
+            factory=lambda: _graph_agent(
+                request,
+                score,
+            ),
+            timeout_seconds=6.0,
+            confidence_weight=1.2,
+        ),
+        WorkflowTask(
+            name="aml_investigation_agent",
+            factory=lambda: aml_agent(
+                request,
+                score,
+            ),
+            timeout_seconds=5.0,
+            confidence_weight=1.4,
+            critical=True,
+        ),
+    ]
+
+    if request.compliance is not None:
+        tasks.append(
+            WorkflowTask(
+                name="compliance_agent",
+                factory=lambda: compliance_agent(
+                    request
+                ),
+                timeout_seconds=4.0,
+                confidence_weight=1.3,
+                critical=True,
+            )
+        )
+
+    policy_query = (
+        "AML suspicious activity investigation involving "
+        f"transaction risk {score.combined_risk_score:.2f}, "
+        f"fraud probability {score.fraud_probability:.2f}, "
+        f"anomaly score {score.anomaly_score:.2f}, "
+        f"velocity {request.transaction.velocity_1h}, "
+        f"merchant risk "
+        f"{request.transaction.merchant_risk_score:.2f}, "
+        f"cross-border="
+        f"{request.transaction.is_cross_border}. "
+        "Retrieve suspicious activity, network risk, "
+        "human review, and AML escalation policies."
+    )
+
+    tasks.append(
+        WorkflowTask(
+            name="workflow_policy_agent",
+            factory=lambda: workflow_policy_agent(
+                request,
+                policy_query,
+            ),
+            timeout_seconds=8.0,
+            confidence_weight=1.2,
+            critical=True,
+        )
+    )
+
+    findings = list(
+        await asyncio.gather(
+            *(
+                _run_workflow_task_safely(
+                    task,
+                    request,
+                )
+                for task in tasks
+            )
+        )
+    )
+
+    aml_finding = next(
+        (
+            finding
+            for finding in findings
+            if finding.agent
+            == "aml_investigation_agent"
+        ),
+        None,
+    )
+
+    compliance_finding = next(
+        (
+            finding
+            for finding in findings
+            if finding.agent
+            == "compliance_agent"
+        ),
+        None,
+    )
+
+    sanctions_escalation = (
+        request.compliance is not None
+        and request.compliance.sanctions_match
+    )
+
+    aml_escalation = (
+        aml_finding is not None
+        and "require" in (
+            aml_finding.conclusion.lower()
+        )
+    )
+
+    if sanctions_escalation:
+        decision = "escalate"
+    elif (
+        score.combined_risk_score >= 0.65
+        or aml_escalation
+    ):
+        decision = "manual_review"
+    elif score.combined_risk_score >= 0.35:
+        decision = "monitor"
+    else:
+        decision = "approve"
+
+    contradictions: list[str] = []
+
+    if (
+        compliance_finding is not None
+        and "passes" in (
+            compliance_finding.conclusion.lower()
+        )
+        and aml_escalation
+    ):
+        contradictions.append(
+            "Customer compliance screening is clear "
+            "while transaction-level AML signals require escalation."
+        )
+
+    confidence = _workflow_confidence(
+        findings,
+        tasks,
+    )
+
+    if contradictions:
+        confidence = round(
+            confidence * 0.90,
+            4,
+        )
+
+    return InvestigationDecision(
+        case_id=request.case_id,
+        workflow="aml",
+        transaction_score=score,
+        findings=findings,
+        contradictions=contradictions,
+        decision=decision,
+        final_confidence=confidence,
+        rationale=(
+            f"AML workflow executed {len(tasks)} specialist "
+            f"tasks in parallel. Transaction risk="
+            f"{score.combined_risk_score:.2f}; "
+            f"governed decision={decision}; "
+            f"confidence={confidence:.2f}."
+        ),
+    )
+
+
+async def _run_credit_workflow(
+    request: InvestigationRequest,
+) -> InvestigationDecision:
+    if request.loan is None:
+        raise ValueError(
+            "Credit workflow requires loan data."
+        )
+
+    credit_score = (
+        score_credit_application(
+            request.loan
+        )
+    )
+
+    policy_query = (
+        "Credit underwriting decision involving "
+        f"risk level {credit_score.risk_level}, "
+        f"risk probability "
+        f"{credit_score.risk_probability:.2f}, "
+        f"debt-to-income ratio "
+        f"{request.loan.debt_to_income_ratio:.2f}, "
+        f"credit score "
+        f"{request.loan.credit_score}, "
+        "human underwriting review, adverse decision "
+        "governance, and model oversight."
+    )
+
+    tasks = [
+        WorkflowTask(
+            name="credit_underwriting_agent",
+            factory=lambda: (
+                credit_underwriting_agent(
+                    request,
+                    credit_score,
+                )
+            ),
+            timeout_seconds=5.0,
+            confidence_weight=1.5,
+            critical=True,
+        ),
+        WorkflowTask(
+            name="workflow_policy_agent",
+            factory=lambda: workflow_policy_agent(
+                request,
+                policy_query,
+            ),
+            timeout_seconds=8.0,
+            confidence_weight=1.2,
+            critical=True,
+        ),
+    ]
+
+    findings = list(
+        await asyncio.gather(
+            *(
+                _run_workflow_task_safely(
+                    task,
+                    request,
+                )
+                for task in tasks
+            )
+        )
+    )
+
+    # High-risk credit outcomes require human oversight rather
+    # than an automatically generated adverse lending decision.
+    if credit_score.requires_human_review:
+        decision = "manual_review"
+    elif credit_score.risk_level == "medium":
+        decision = "monitor"
+    else:
+        decision = "approve"
+
+    confidence = _workflow_confidence(
+        findings,
+        tasks,
+    )
+
+    return InvestigationDecision(
+        case_id=request.case_id,
+        workflow="credit",
+        credit_score=credit_score,
+        findings=findings,
+        contradictions=[],
+        decision=decision,
+        final_confidence=confidence,
+        rationale=(
+            "Credit workflow combined explainable "
+            "underwriting risk with semantic policy evidence. "
+            f"Credit risk="
+            f"{credit_score.risk_probability:.2f} "
+            f"({credit_score.risk_level}); "
+            f"governed decision={decision}; "
+            f"confidence={confidence:.2f}."
+        ),
+    )
+
+
+async def _run_compliance_workflow(
+    request: InvestigationRequest,
+) -> InvestigationDecision:
+    if request.compliance is None:
+        raise ValueError(
+            "Compliance workflow requires compliance data."
+        )
+
+    compliance = request.compliance
+
+    policy_query = (
+        "Customer compliance review involving "
+        f"KYC verified={compliance.kyc_verified}, "
+        f"PEP={compliance.is_pep}, "
+        f"sanctions match={compliance.sanctions_match}, "
+        f"customer risk="
+        f"{compliance.customer_risk_level}. "
+        "Retrieve KYC, sanctions, enhanced due diligence, "
+        "human review, and governance policies."
+    )
+
+    tasks = [
+        WorkflowTask(
+            name="compliance_agent",
+            factory=lambda: compliance_agent(
+                request
+            ),
+            timeout_seconds=4.0,
+            confidence_weight=1.5,
+            critical=True,
+        ),
+        WorkflowTask(
+            name="workflow_policy_agent",
+            factory=lambda: workflow_policy_agent(
+                request,
+                policy_query,
+            ),
+            timeout_seconds=8.0,
+            confidence_weight=1.2,
+            critical=True,
+        ),
+    ]
+
+    findings = list(
+        await asyncio.gather(
+            *(
+                _run_workflow_task_safely(
+                    task,
+                    request,
+                )
+                for task in tasks
+            )
+        )
+    )
+
+    if compliance.sanctions_match:
+        decision = "escalate"
+    elif (
+        not compliance.kyc_verified
+        or compliance.is_pep
+        or compliance.customer_risk_level
+        in {"high", "critical"}
+    ):
+        decision = "manual_review"
+    else:
+        decision = "approve"
+
+    confidence = _workflow_confidence(
+        findings,
+        tasks,
+    )
+
+    return InvestigationDecision(
+        case_id=request.case_id,
+        workflow="compliance",
+        findings=findings,
+        contradictions=[],
+        decision=decision,
+        final_confidence=confidence,
+        rationale=(
+            "Compliance workflow combined KYC, PEP, "
+            "sanctions, customer-risk, and semantic "
+            "policy evidence. "
+            f"Governed decision={decision}; "
+            f"confidence={confidence:.2f}."
+        ),
+    )
+
+
+async def run_investigation(
+    request: InvestigationRequest,
+) -> InvestigationDecision:
+    """
+    Day 6 governed banking workflow router.
+    """
+
+    if request.workflow == "fraud":
+        return await _run_fraud_workflow(
+            request
+        )
+
+    if request.workflow == "aml":
+        return await _run_aml_workflow(
+            request
+        )
+
+    if request.workflow == "credit":
+        return await _run_credit_workflow(
+            request
+        )
+
+    if request.workflow == "compliance":
+        return await _run_compliance_workflow(
+            request
+        )
+
+    raise ValueError(
+        f"Unsupported workflow: {request.workflow}"
     )
