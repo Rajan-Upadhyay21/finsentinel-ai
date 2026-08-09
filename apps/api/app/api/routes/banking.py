@@ -8,6 +8,13 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.agents.orchestrator import run_investigation
+from app.core.permissions import (
+    Permission,
+    ensure_permission,
+    ensure_workflow_decision_permission,
+)
+from app.core.security import CurrentUser
+from app.core.audit_identity import principal_audit_details
 from app.db.session import get_db
 from app.models.banking import (
     Account,
@@ -48,7 +55,7 @@ router = APIRouter(
 class ApprovalReviewRequest(BaseModel):
     """Human review payload for a pending AI-generated approval."""
 
-    reviewer_id: str = Field(min_length=1, max_length=128)
+    reviewer_id: str | None = Field(default=None, min_length=1, max_length=128)
     approved: bool
     reviewer_comment: str | None = Field(default=None, max_length=2000)
 
@@ -73,9 +80,11 @@ def _commit_or_rollback(db: Session) -> None:
     status_code=status.HTTP_201_CREATED,
 )
 def create_customer(
+    current_user: CurrentUser,
     payload: CustomerCreate,
     db: Session = Depends(get_db),
 ) -> Customer:
+    ensure_permission(current_user, Permission.PLATFORM_ADMIN)
     """Create a new banking customer."""
 
     customer = Customer(
@@ -110,10 +119,12 @@ def create_customer(
     response_model=list[CustomerRead],
 )
 def list_customers(
+    current_user: CurrentUser,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[Customer]:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Return banking customers using pagination."""
 
     statement = (
@@ -130,9 +141,11 @@ def list_customers(
     response_model=CustomerRead,
 )
 def get_customer(
+    current_user: CurrentUser,
     customer_id: UUID,
     db: Session = Depends(get_db),
 ) -> Customer:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Retrieve one customer by internal UUID."""
 
     customer = db.get(Customer, customer_id)
@@ -155,9 +168,11 @@ def get_customer(
     status_code=status.HTTP_201_CREATED,
 )
 def create_account(
+    current_user: CurrentUser,
     payload: AccountCreate,
     db: Session = Depends(get_db),
 ) -> Account:
+    ensure_permission(current_user, Permission.PLATFORM_ADMIN)
     """Create a bank account linked to an existing customer."""
 
     customer = db.get(Customer, payload.customer_id)
@@ -196,10 +211,12 @@ def create_account(
     response_model=list[AccountRead],
 )
 def list_accounts(
+    current_user: CurrentUser,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[Account]:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Return bank accounts using pagination."""
 
     statement = (
@@ -216,9 +233,11 @@ def list_accounts(
     response_model=AccountRead,
 )
 def get_account(
+    current_user: CurrentUser,
     account_id: UUID,
     db: Session = Depends(get_db),
 ) -> Account:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Retrieve one account by internal UUID."""
 
     account = db.get(Account, account_id)
@@ -241,9 +260,11 @@ def get_account(
     status_code=status.HTTP_201_CREATED,
 )
 def create_transaction(
+    current_user: CurrentUser,
     payload: TransactionCreate,
     db: Session = Depends(get_db),
 ) -> Transaction:
+    ensure_permission(current_user, Permission.PLATFORM_ADMIN)
     """Create a banking transaction linked to an existing account."""
 
     account = db.get(Account, payload.account_id)
@@ -294,10 +315,12 @@ def create_transaction(
     response_model=list[TransactionRead],
 )
 def list_transactions(
+    current_user: CurrentUser,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[Transaction]:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Return banking transactions using pagination."""
 
     statement = (
@@ -314,9 +337,11 @@ def list_transactions(
     response_model=TransactionRead,
 )
 def get_transaction(
+    current_user: CurrentUser,
     transaction_id: UUID,
     db: Session = Depends(get_db),
 ) -> Transaction:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Retrieve one transaction by internal UUID."""
 
     transaction = db.get(Transaction, transaction_id)
@@ -338,9 +363,11 @@ def get_transaction(
     response_model=InvestigationDecision,
 )
 async def investigate_stored_transaction(
+    current_user: CurrentUser,
     transaction_id: UUID,
     db: Session = Depends(get_db),
 ) -> InvestigationDecision:
+    ensure_permission(current_user, Permission.FRAUD_INVESTIGATE)
     """
     Load a persisted transaction, execute the fraud investigation workflow,
     and persist the governed case, approval request, audit record and
@@ -494,6 +521,9 @@ async def investigate_stored_transaction(
             resource_id=str(transaction.id),
             outcome="success",
             details={
+                "initiated_by": principal_audit_details(
+                    current_user
+                ),
                 "case_id": str(case.id),
                 "decision": str(decision.decision),
                 "risk_level": str(decision.transaction_score.risk_level),
@@ -526,9 +556,11 @@ async def investigate_stored_transaction(
     status_code=status.HTTP_201_CREATED,
 )
 def create_loan_application(
+    current_user: CurrentUser,
     payload: LoanApplicationCreate,
     db: Session = Depends(get_db),
 ) -> LoanApplication:
+    ensure_permission(current_user, Permission.PLATFORM_ADMIN)
     """Create a loan application linked to an existing customer."""
 
     customer = db.get(Customer, payload.customer_id)
@@ -570,10 +602,12 @@ def create_loan_application(
     response_model=list[LoanApplicationRead],
 )
 def list_loan_applications(
+    current_user: CurrentUser,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[LoanApplication]:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Return loan applications using pagination."""
 
     statement = (
@@ -590,9 +624,11 @@ def list_loan_applications(
     response_model=LoanApplicationRead,
 )
 def get_loan_application(
+    current_user: CurrentUser,
     loan_id: UUID,
     db: Session = Depends(get_db),
 ) -> LoanApplication:
+    ensure_permission(current_user, Permission.BANKING_READ)
     """Retrieve one loan application by internal UUID."""
 
     loan = db.get(LoanApplication, loan_id)
@@ -614,10 +650,12 @@ def get_loan_application(
     response_model=list[InvestigationCaseRead],
 )
 def list_investigation_cases(
+    current_user: CurrentUser,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[InvestigationCase]:
+    ensure_permission(current_user, Permission.INVESTIGATION_READ)
     """Return persisted AI investigation cases."""
 
     statement = (
@@ -634,9 +672,11 @@ def list_investigation_cases(
     response_model=InvestigationCaseRead,
 )
 def get_investigation_case(
+    current_user: CurrentUser,
     case_id: UUID,
     db: Session = Depends(get_db),
 ) -> InvestigationCase:
+    ensure_permission(current_user, Permission.INVESTIGATION_READ)
     """Return one persisted AI investigation case."""
 
     case = db.get(InvestigationCase, case_id)
@@ -658,10 +698,12 @@ def get_investigation_case(
     response_model=list[ApprovalRead],
 )
 def list_approvals(
+    current_user: CurrentUser,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[Approval]:
+    ensure_permission(current_user, Permission.INVESTIGATION_READ)
     """Return human-review requests."""
 
     statement = (
@@ -678,10 +720,38 @@ def list_approvals(
     response_model=ApprovalRead,
 )
 def review_approval(
+    current_user: CurrentUser,
     approval_id: UUID,
     payload: ApprovalReviewRequest,
     db: Session = Depends(get_db),
 ) -> Approval:
+    approval_for_auth = db.get(
+        Approval,
+        approval_id,
+    )
+
+    if approval_for_auth is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Approval not found.",
+        )
+
+    case_for_auth = db.get(
+        InvestigationCase,
+        approval_for_auth.case_id,
+    )
+
+    if case_for_auth is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Investigation case not found.",
+        )
+
+    ensure_workflow_decision_permission(
+        current_user,
+        case_for_auth.case_type,
+    )
+
     """Approve or reject a pending AI-generated review request."""
 
     approval = db.get(Approval, approval_id)
@@ -707,7 +777,7 @@ def review_approval(
     approval.status = (
         ApprovalStatus.APPROVED if payload.approved else ApprovalStatus.REJECTED
     )
-    approval.reviewer_id = payload.reviewer_id
+    approval.reviewer_id = current_user.username
     approval.reviewer_comment = payload.reviewer_comment
     approval.decided_at = datetime.now(timezone.utc)
 
@@ -718,7 +788,7 @@ def review_approval(
     db.add(
         AuditLog(
             actor_type="human",
-            actor_id=payload.reviewer_id,
+            actor_id=current_user.subject,
             action=(
                 "investigation_approval_approved"
                 if payload.approved
@@ -728,6 +798,9 @@ def review_approval(
             resource_id=str(case.id),
             outcome="success",
             details={
+                "authenticated_principal": principal_audit_details(
+                    current_user
+                ),
                 "approval_id": str(approval.id),
                 "reviewer_comment": payload.reviewer_comment,
                 "new_case_status": case.status.value,
@@ -750,10 +823,12 @@ def review_approval(
     response_model=list[AuditLogRead],
 )
 def list_audit_logs(
+    current_user: CurrentUser,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[AuditLog]:
+    ensure_permission(current_user, Permission.AUDIT_READ)
     """Return persisted system, agent and human audit events."""
 
     statement = (
