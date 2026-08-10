@@ -1,3 +1,4 @@
+from app.core.observability import configure_observability
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -46,3 +47,6 @@ def root() -> dict[str, str]:
 @app.get("/metrics", include_in_schema=False)
 def metrics() -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+# Production observability
+configure_observability(app)
