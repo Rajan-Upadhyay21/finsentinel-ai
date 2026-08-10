@@ -1,0 +1,40 @@
+api:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/rajan-upadhyay21/finsentinel-api
+    tag: latest
+    pullPolicy: Always
+  existingSecret: finsentinel-api-secrets
+  service:
+    type: ClusterIP
+    port: 8000
+  config:
+    APP_ENV: production
+    OTEL_TRACING_ENABLED: "true"
+  probes:
+    startupPath: /health/live
+    livenessPath: /health/live
+    readinessPath: /health/ready
+
+web:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/rajan-upadhyay21/finsentinel-web
+    tag: latest
+    pullPolicy: Always
+  service:
+    type: ClusterIP
+    port: 3000
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilization: 70
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true

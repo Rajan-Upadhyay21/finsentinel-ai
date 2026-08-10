@@ -1,0 +1,15 @@
+FinSentinel AI has been deployed.
+
+Useful commands:
+
+  kubectl get pods -n {{ .Release.Namespace }}
+
+  kubectl rollout status deployment/{{ include "finsentinel.fullname" . }}-api \
+    -n {{ .Release.Namespace }}
+
+  helm history {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Rollback:
+
+  helm rollback {{ .Release.Name }} <REVISION> \
+    -n {{ .Release.Namespace }} --wait
