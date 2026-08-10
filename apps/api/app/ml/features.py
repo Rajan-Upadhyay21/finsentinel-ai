@@ -5,7 +5,6 @@ from typing import Iterable
 
 import numpy as np
 
-
 FRAUD_FEATURES: list[str] = [
     "log_amount",
     "amount_zscore",

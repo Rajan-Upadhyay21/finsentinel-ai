@@ -1,0 +1,127 @@
+name: FinSentinel Delivery
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - feature/day9-kubernetes-cicd
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  backend-quality:
+    name: Backend Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install backend
+        working-directory: apps/api
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+          pip install ruff
+
+      - name: Ruff
+        working-directory: apps/api
+        run: ruff check .
+
+      - name: Backend regression
+        working-directory: apps/api
+        run: pytest -q
+
+  helm-validation:
+    name: Helm Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 -o /tmp/get_helm.sh
+          chmod 700 /tmp/get_helm.sh
+          /tmp/get_helm.sh
+
+      - name: Helm lint
+        run: helm lint infrastructure/helm/finsentinel --strict
+
+      - name: Render development manifests
+        run: |
+          helm template finsentinel \
+            infrastructure/helm/finsentinel \
+            > /tmp/finsentinel-dev.yaml
+
+      - name: Render production manifests
+        run: |
+          helm template finsentinel \
+            infrastructure/helm/finsentinel \
+            -f infrastructure/helm/finsentinel/values-prod.yaml \
+            > /tmp/finsentinel-prod.yaml
+
+  container-build:
+    name: Container Build
+    runs-on: ubuntu-latest
+    needs:
+      - backend-quality
+      - helm-validation
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build API and Web
+        run: docker compose build api web
+
+      - name: Verify image IDs
+        run: |
+          test -n "$(docker compose images -q api | head -1)"
+          test -n "$(docker compose images -q web | head -1)"
+
+  publish-ghcr:
+    name: Publish GHCR
+    runs-on: ubuntu-latest
+    needs:
+      - container-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build images
+        run: docker compose build api web
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and publish
+        shell: bash
+        run: |
+          OWNER="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          API_ID="$(docker compose images -q api | head -1)"
+          WEB_ID="$(docker compose images -q web | head -1)"
+
+          docker tag "$API_ID" "ghcr.io/$OWNER/finsentinel-api:$GITHUB_SHA"
+          docker tag "$API_ID" "ghcr.io/$OWNER/finsentinel-api:latest"
+          docker tag "$WEB_ID" "ghcr.io/$OWNER/finsentinel-web:$GITHUB_SHA"
+          docker tag "$WEB_ID" "ghcr.io/$OWNER/finsentinel-web:latest"
+
+          docker push "ghcr.io/$OWNER/finsentinel-api:$GITHUB_SHA"
+          docker push "ghcr.io/$OWNER/finsentinel-api:latest"
+          docker push "ghcr.io/$OWNER/finsentinel-web:$GITHUB_SHA"
+          docker push "ghcr.io/$OWNER/finsentinel-web:latest"

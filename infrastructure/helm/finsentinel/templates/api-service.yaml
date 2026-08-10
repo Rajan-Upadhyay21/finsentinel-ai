@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "finsentinel.fullname" . }}-api
+  labels:
+    app.kubernetes.io/name: finsentinel
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.api.service.type }}
+  selector:
+    app.kubernetes.io/name: finsentinel
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.api.service.port }}
+      targetPort: http
+      {{- if eq .Values.api.service.type "NodePort" }}
+      nodePort: {{ .Values.api.service.nodePort }}
+      {{- end }}
