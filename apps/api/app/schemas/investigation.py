@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.transaction import TransactionFeatures, TransactionScore
 
-
 WorkflowType = Literal[
     "fraud",
     "aml",

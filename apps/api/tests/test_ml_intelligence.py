@@ -9,7 +9,6 @@ from app.ml.inference import FraudInferenceEngine
 from app.schemas.transaction import TransactionFeatures
 from app.services.risk_engine import score_transaction
 
-
 MODEL_PATH = Path("artifacts/ml/fraud/fraud_bundle.joblib")
 
 

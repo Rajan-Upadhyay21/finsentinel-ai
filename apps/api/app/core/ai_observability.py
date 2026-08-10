@@ -8,7 +8,6 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 from prometheus_client import Counter, Gauge, Histogram
 
-
 WORKFLOW_EXECUTIONS = Counter(
     "finsentinel_workflow_executions_total",
     "Completed governed banking workflows.",

@@ -1,6 +1,5 @@
-from app.core.observability import configure_observability
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +9,7 @@ from starlette.responses import Response
 from app.api.routes import banking, health, investigations, security, transactions
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.observability import configure_observability
 
 settings = get_settings()
 

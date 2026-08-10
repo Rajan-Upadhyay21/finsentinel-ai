@@ -7,7 +7,6 @@ from typing import Any
 import joblib
 import numpy as np
 
-
 DEFAULT_MODEL_PATH = Path("artifacts/ml/fraud/fraud_bundle.joblib")
 
 

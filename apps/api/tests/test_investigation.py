@@ -1,10 +1,10 @@
 from decimal import Decimal
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
-from app.main import app
 from app.core.security import AuthenticatedUser, get_current_user
+from app.main import app
 
 
 def _authenticated_fraud_analyst() -> AuthenticatedUser:

@@ -6,7 +6,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 from qdrant_client import QdrantClient, models
 
-
 COLLECTION_NAME = "finsentinel_policies"
 EMBEDDING_MODEL = "BAAI/bge-small-en"
 

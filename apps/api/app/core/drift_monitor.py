@@ -8,7 +8,6 @@ from typing import Any
 
 from prometheus_client import Counter, Gauge
 
-
 FEATURE_DRIFT_SCORE = Gauge(
     "finsentinel_feature_drift_score",
     "Rolling normalized shift from the online reference baseline.",
