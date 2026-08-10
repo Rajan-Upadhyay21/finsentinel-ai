@@ -1,13 +1,45 @@
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.main import app
+from app.core.security import AuthenticatedUser, get_current_user
+
+
+def _authenticated_fraud_analyst() -> AuthenticatedUser:
+    return AuthenticatedUser(
+        subject="test-fraud-analyst-subject",
+        username="test-fraud-analyst",
+        email="fraud.analyst@example.test",
+        roles=frozenset(
+            {
+                "fraud_analyst",
+            }
+        ),
+    )
+
+
+
+@pytest.fixture
+def fraud_analyst_auth():
+    app.dependency_overrides[
+        get_current_user
+    ] = _authenticated_fraud_analyst
+
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(
+            get_current_user,
+            None,
+        )
+
 
 client = TestClient(app)
 
 
-def test_parallel_investigation_contract() -> None:
+def test_parallel_investigation_contract(fraud_analyst_auth) -> None:
     response = client.post(
         "/api/v1/investigations/run",
         json={

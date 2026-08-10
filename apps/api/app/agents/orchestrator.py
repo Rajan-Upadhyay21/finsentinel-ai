@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from app.core.ai_observability import observe_agent_execution, observe_investigation
 from app.schemas.investigation import (
     AgentFinding,
     Evidence,
@@ -398,7 +399,7 @@ def _select_agents(
     return agents
 
 
-async def _run_agent_safely(
+async def _run_agent_safely_unobserved(
     spec: AgentSpec,
     request: InvestigationRequest,
     score: TransactionScore,
@@ -467,6 +468,23 @@ async def _run_agent_safely(
             ],
             warnings=[warning],
         )
+
+async def _run_agent_safely(
+    *args,
+    **kwargs,
+):
+    subject = (
+        args[0]
+        if args
+        else kwargs.get("spec")
+    )
+
+    return await observe_agent_execution(
+        subject,
+        _run_agent_safely_unobserved,
+        *args,
+        **kwargs,
+    )
 
 
 def _finding(
@@ -618,7 +636,7 @@ class WorkflowTask:
     critical: bool = False
 
 
-async def _run_workflow_task_safely(
+async def _run_workflow_task_safely_unobserved(
     task: WorkflowTask,
     request: InvestigationRequest,
 ) -> AgentFinding:
@@ -683,6 +701,23 @@ async def _run_workflow_task_safely(
             ],
             warnings=[warning],
         )
+
+async def _run_workflow_task_safely(
+    *args,
+    **kwargs,
+):
+    subject = (
+        args[0]
+        if args
+        else kwargs.get("task")
+    )
+
+    return await observe_agent_execution(
+        subject,
+        _run_workflow_task_safely_unobserved,
+        *args,
+        **kwargs,
+    )
 
 
 def _workflow_confidence(
@@ -1196,7 +1231,7 @@ async def _run_compliance_workflow(
     )
 
 
-async def run_investigation(
+async def _run_investigation_unobserved(
     request: InvestigationRequest,
 ) -> InvestigationDecision:
     """
@@ -1225,4 +1260,12 @@ async def run_investigation(
 
     raise ValueError(
         f"Unsupported workflow: {request.workflow}"
+    )
+
+async def run_investigation(
+    request: InvestigationRequest,
+) -> InvestigationDecision:
+    return await observe_investigation(
+        request,
+        _run_investigation_unobserved,
     )

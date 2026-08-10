@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.core.drift_monitor import observe_model_sample
 from app.ml.features import TransactionFeatureInput, engineer_feature_row
 from app.ml.inference import get_fraud_inference_engine
 from app.schemas.transaction import (
@@ -116,7 +117,7 @@ def _build_risk_factors(tx: TransactionFeatures) -> list[RiskFactor]:
     )
 
 
-def score_transaction(tx: TransactionFeatures) -> TransactionScore:
+def _score_transaction_unobserved(tx: TransactionFeatures) -> TransactionScore:
     """
     Score a transaction using the trained FinSentinel ML fraud bundle.
 
@@ -203,3 +204,19 @@ def score_transaction(tx: TransactionFeatures) -> TransactionScore:
         requires_human_review=risk_level in {"high", "critical"},
         risk_factors=risk_factors,
     )
+
+def score_transaction(
+    tx: TransactionFeatures,
+) -> TransactionScore:
+    score = (
+        _score_transaction_unobserved(
+            tx
+        )
+    )
+
+    observe_model_sample(
+        tx,
+        score,
+    )
+
+    return score
