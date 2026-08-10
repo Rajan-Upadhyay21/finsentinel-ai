@@ -10,7 +10,6 @@ from app.schemas.investigation import (
     InvestigationRequest,
 )
 
-
 router = APIRouter(
     prefix="/api/v1/investigations",
     tags=["investigations"],

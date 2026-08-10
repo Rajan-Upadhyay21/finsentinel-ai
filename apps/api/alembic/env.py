@@ -1,14 +1,13 @@
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from app.core.config import get_settings
-from app.models.base import Base
 
 # Import banking models so SQLAlchemy registers them with Base.metadata.
 from app.models import banking  # noqa: F401
-
+from app.models.base import Base
 
 config = context.config
 settings = get_settings()

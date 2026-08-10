@@ -2,6 +2,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from app.agents.workflow_agents import (
+    aml_agent,
+    compliance_agent,
+    credit_underwriting_agent,
+    workflow_policy_agent,
+)
 from app.core.ai_observability import observe_agent_execution, observe_investigation
 from app.schemas.investigation import (
     AgentFinding,
@@ -10,14 +16,8 @@ from app.schemas.investigation import (
     InvestigationRequest,
 )
 from app.schemas.transaction import TransactionScore
-from app.services.risk_engine import score_transaction
 from app.services.credit_engine import score_credit_application
-from app.agents.workflow_agents import (
-    aml_agent,
-    compliance_agent,
-    credit_underwriting_agent,
-    workflow_policy_agent,
-)
+from app.services.risk_engine import score_transaction
 
 
 async def _fraud_agent(request: InvestigationRequest, score: TransactionScore) -> AgentFinding:
@@ -296,10 +296,6 @@ async def _policy_agent(
             )
         )
 
-    retrieved_ids = [
-        match.policy_id
-        for match in matches
-    ]
 
     return AgentFinding(
         agent="policy_compliance_agent",

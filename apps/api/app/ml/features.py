@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 FRAUD_FEATURES: list[str] = [
     "log_amount",

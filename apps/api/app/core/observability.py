@@ -6,7 +6,6 @@ import time
 from fastapi import FastAPI, Request
 from prometheus_client import Counter, Gauge, Histogram
 
-
 HTTP_REQUESTS = Counter(
     "finsentinel_http_requests_total",
     "Total FinSentinel HTTP requests.",

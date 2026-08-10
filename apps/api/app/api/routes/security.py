@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
-
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from app.core.permissions import (
     permissions_for_roles,
 )
 from app.core.security import CurrentUser
-
 
 router = APIRouter(
     prefix="/api/v1/security",

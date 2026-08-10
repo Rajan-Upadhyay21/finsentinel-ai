@@ -8,13 +8,13 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.agents.orchestrator import run_investigation
+from app.core.audit_identity import principal_audit_details
 from app.core.permissions import (
     Permission,
     ensure_permission,
     ensure_workflow_decision_permission,
 )
 from app.core.security import CurrentUser
-from app.core.audit_identity import principal_audit_details
 from app.db.session import get_db
 from app.models.banking import (
     Account,
@@ -44,7 +44,6 @@ from app.schemas.banking import (
 )
 from app.schemas.investigation import InvestigationDecision, InvestigationRequest
 from app.schemas.transaction import TransactionFeatures
-
 
 router = APIRouter(
     prefix="/api/v1/banking",
