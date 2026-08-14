@@ -1,0 +1,17 @@
+# Kubernetes Evidence
+
+NAME                        STATUS   ROLES           AGE     VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                       KERNEL-VERSION             CONTAINER-RUNTIME
+finsentinel-control-plane   Ready    control-plane   4d20h   v1.36.1   172.19.0.3    <none>        Debian GNU/Linux 13 (trixie)   6.12.76-linuxkit (arm64)   containerd://2.3.1
+finsentinel-worker          Ready    <none>          4d20h   v1.36.1   172.19.0.2    <none>        Debian GNU/Linux 13 (trixie)   6.12.76-linuxkit (arm64)   containerd://2.3.1
+
+NAME                              READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES                 SELECTOR
+deployment.apps/finsentinel-api   1/1     1            1           4d19h   api          finsentinel-api:day9   app.kubernetes.io/component=api,app.kubernetes.io/name=finsentinel
+deployment.apps/finsentinel-web   1/1     1            1           4d19h   web          finsentinel-web:day9   app.kubernetes.io/component=web,app.kubernetes.io/name=finsentinel
+
+NAME                                   READY   STATUS    RESTARTS   AGE     IP            NODE                 NOMINATED NODE   READINESS GATES
+pod/finsentinel-api-5dc67bb944-8g8nz   1/1     Running   0          4d19h   10.244.1.10   finsentinel-worker   <none>           <none>
+pod/finsentinel-web-578f89d7cd-m9r9h   1/1     Running   0          4d19h   10.244.1.8    finsentinel-worker   <none>           <none>
+
+NAME                      TYPE       CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE     SELECTOR
+service/finsentinel-api   NodePort   10.96.118.10   <none>        8000:30080/TCP   4d19h   app.kubernetes.io/component=api,app.kubernetes.io/name=finsentinel
+service/finsentinel-web   NodePort   10.96.36.171   <none>        3000:30081/TCP   4d19h   app.kubernetes.io/component=web,app.kubernetes.io/name=finsentinel
