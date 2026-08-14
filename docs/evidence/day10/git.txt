@@ -1,0 +1,14 @@
+# Git Evidence
+
+?? docs/evidence/
+
+31a8ac6 Polish FinSentinel architecture and recruiter demo documentation
+7a2f4c4 Remove duplicate Helm API and web manifests
+75b6847 Merge verified backend Ruff cleanup
+565139f Apply verified backend Ruff cleanup
+60d3c2e Merge Day 9 Kubernetes Helm and CI CD
+1ceb63e Build Day 9 Kubernetes Helm CI CD and GitOps delivery
+e6d8468 Merge Day 8 observability and MLOps
+c9f5d48 Build Day 8 production observability tracing and ML drift monitoring
+a3fd7ee Merge Day 7 security governance
+56ccb65 Build Day 7 Keycloak authentication RBAC and governed audit identity

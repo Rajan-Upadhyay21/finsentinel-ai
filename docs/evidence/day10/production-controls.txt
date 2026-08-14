@@ -1,0 +1,12 @@
+# Kubernetes Production Controls
+
+## HPA
+
+## PDB
+
+## NetworkPolicy
+
+## Deployments
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE
+finsentinel-api   1/1     1            1           4d19h
+finsentinel-web   1/1     1            1           4d19h
