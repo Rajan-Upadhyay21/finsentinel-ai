@@ -38,6 +38,10 @@ jobs:
         working-directory: apps/api
         run: ruff check .
 
+      - name: Build deterministic fraud model artifact
+        working-directory: apps/api
+        run: python scripts/train_fraud_models.py --rows 2000 --random-state 42
+
       - name: Backend regression
         working-directory: apps/api
         run: pytest -q
